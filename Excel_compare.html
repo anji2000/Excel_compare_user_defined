@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Excel Compare — Two Files, Single-File Snapshots, or Column-Pair Mapping</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    :root { --bg:#0b1220; --card:#121a2a; --muted:#8aa0b4; --accent:#4da3ff; --border:#1f2a3d; --good:#17c964; --bad:#f31260; }
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:#e6eef6}
+    .wrap{max-width:1200px;margin:28px auto;padding:0 16px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px}
+    h1{font-size:24px;margin:0 0 10px} p.sub{margin:0 0 20px;color:var(--muted)}
+    label{display:block;margin:8px 0 6px;color:#cfe1f2;font-weight:600}
+    input[type=file],select,button,.pill{background:#0e1626;border:1px solid var(--border);color:#e6eef6;border-radius:12px;padding:10px 12px}
+    input[type=file]{width:100%} select{width:100%}
+    .grid{display:grid;gap:16px}
+    @media(min-width:980px){.grid{grid-template-columns:1.3fr 1fr}}
+    .row{display:flex;gap:12px;flex-wrap:wrap;align-items:end}
+    button{cursor:pointer;border-radius:12px;padding:12px 14px;font-weight:700}
+    button.primary{background:var(--accent);border:none;color:#001224}
+    button.ghost{background:transparent;border:1px dashed var(--border);color:#8aa0b4}
+    table{width:100%;border-collapse:collapse;margin-top:14px}
+    th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+    th{font-size:13px;color:#cfe1f2}
+    tr.added td{background:rgba(23,201,100,0.06)} tr.removed td{background:rgba(243,18,96,0.07)}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;border:1px solid var(--border);color:#b9cadd}
+    .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+    .chip{background:#0e1626;border:1px solid var(--border);padding:6px 10px;border-radius:999px;font-size:12px;color:#b9cadd}
+    .muted{color:var(--muted)}
+    .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+    .toolbar input{flex:1;min-width:240px}
+    .pill{display:inline-flex;gap:8px;align-items:center}
+    .right{margin-left:auto}
+    .small{font-size:12px}
+    .side{background:#0d1424;border:1px solid var(--border);border-radius:14px;padding:14px}
+    .two{display:grid;gap:16px}
+    @media(min-width:980px){.two{grid-template-columns:1fr 1fr}}
+    .summary-list{display:flex;flex-wrap:wrap;gap:8px}
+    .summary-item{border:1px solid var(--border);border-radius:999px;padding:6px 10px;font-size:12px}
+    .hint{font-size:12px;color:#9bb0c5}
+    .map-table{width:100%;border-collapse:collapse;margin-top:8px}
+    .map-table th,.map-table td{border-bottom:1px solid var(--border);padding:8px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Excel Compare — Old vs New</h1>
+      <p class="sub">Upload Excel → select <b>identifier column(s)</b> → choose compare strategy → get a detailed diff and a summary of <b>which columns changed</b>. Supports: <i>two files</i>, <i>single file by snapshot</i>, and <i>single file column-pair mapping</i>.</p>
+
+      <div class="grid">
+        <div>
+          <div class="two">
+            <div>
+              <label>Mode</label>
+              <select id="modeSel">
+                <option value="two">Two files (Old vs New)</option>
+                <option value="one">Single file</option>
+              </select>
+            </div>
+            <div id="oneStrategyBox" style="display:none">
+              <label class="small">Single-file comparison type</label>
+              <select id="singleType">
+                <option value="snapshot" selected>Snapshots (version column)</option>
+                <option value="pairs">Column pairs (map old/new columns)</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="twoFileInputs" class="two" style="margin-top:8px">
+            <div>
+              <label>Old file (previous)</label>
+              <input id="fileOld" type="file" accept=".xlsx,.xls,.csv" />
+            </div>
+            <div>
+              <label>New file (latest)</label>
+              <input id="fileNew" type="file" accept=".xlsx,.xls,.csv" />
+            </div>
+          </div>
+
+          <div id="oneFileInputs" style="display:none; margin-top:8px">
+            <div>
+              <label>Single file (contains both versions)</label>
+              <input id="fileOne" type="file" accept=".xlsx,.xls,.csv" />
+            </div>
+
+            <div id="snapshotConfig" class="side" style="background:transparent;border:none;padding:0;margin-top:8px">
+              <label>Version column (e.g., Snapshot/Version/Date)</label>
+              <select id="versionCol"></select>
+              <div class="two" style="margin-top:8px">
+                <div>
+                  <label>Old value</label>
+                  <select id="versionOld"></select>
+                </div>
+                <div>
+                  <label>New value</label>
+                  <select id="versionNew"></select>
+                </div>
+              </div>
+              <div class="hint" style="margin-top:6px">We split the sheet into two datasets by the chosen version values.</div>
+            </div>
+
+            <div id="pairsConfig" class="side" style="display:none;background:transparent;border:none;padding:0;margin-top:8px">
+              <label>Map columns to Old/New</label>
+              <div class="hint">We detected all headers. Pick which column is the <b>Old</b> source and which is the <b>New</b> source for each base field you want to compare. You can leave rows blank to skip.</div>
+              <table class="map-table" id="pairsTable">
+                <thead>
+                  <tr><th style="width:35%">Base field</th><th>Old column</th><th>New column</th></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="row" style="margin-top:12px">
+            <button id="btnPeek" class="ghost" title="Preview headers">Detect & Preview Headers</button>
+            <button id="btnCompare" class="primary">Compare</button>
+            <button id="btnExport" class="pill" disabled>Export CSV</button>
+            <button id="btnExportSummary" class="pill" disabled>Export Summary CSV</button>
+            <span class="right hint">All processing is local to your browser.</span>
+          </div>
+
+          <div class="toolbar">
+            <input id="filterInput" class="pill" placeholder="Filter by identifier or column..." />
+            <label class="pill small"><input type="checkbox" id="toggleAdds" checked style="margin-right:8px">Show added rows</label>
+            <label class="pill small"><input type="checkbox" id="toggleRemoves" checked style="margin-right:8px">Show removed rows</label>
+            <label class="pill small"><input type="checkbox" id="toggleSummaryOnly" style="margin-right:8px">Summary only</label>
+          </div>
+
+          <div id="resultCounts" class="muted small" style="margin-top:10px"></div>
+
+          <table id="resultTable" style="display:none">
+            <thead>
+              <tr>
+                <th>Identifier</th>
+                <th>Column</th>
+                <th>Previous</th>
+                <th>Latest</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="side">
+          <label>Identifier columns (Ctrl/Cmd to multi‑select)</label>
+          <select id="idCols" multiple size="8"></select>
+
+          <div class="row" style="margin-top:8px">
+            <div style="flex:1">
+              <label class="small">Identifier delimiter</label>
+              <input id="idDelim" class="pill" placeholder="e.g. | or : or -" value="||" />
+            </div>
+            <div style="flex:1">
+              <label class="small">Case sensitivity</label>
+              <select id="caseMode">
+                <option value="insensitive" selected>Case‑insensitive</option>
+                <option value="sensitive">Case‑sensitive</option>
+              </select>
+            </div>
+          </div>
+
+          <label style="margin-top:14px">Columns to compare (excludes selected identifiers)</label>
+          <select id="cmpCols" multiple size="10"></select>
+          <div class="row" style="margin-top:8px">
+            <button id="btnSelectAll" class="pill">Select all</button>
+            <button id="btnClearAll" class="pill">Clear</button>
+          </div>
+
+          <div style="margin-top:14px">
+            <div class="muted small">Detected common columns:</div>
+            <div class="chips" id="commonInfo"></div>
+          </div>
+
+          <div style="margin-top:16px">
+            <div class="muted small">Summary — columns that changed (with counts)</div>
+            <div id="summaryList" class="summary-list" style="margin-top:6px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  async function readExcel(file){
+    if(!file) return [];
+    const data = await file.arrayBuffer();
+    const wb = XLSX.read(data, {type:'array'});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(ws, {defval:null, raw:false});
+  }
+
+  const $ = s => document.querySelector(s);
+  const $$ = s => Array.from(document.querySelectorAll(s));
+  const norm = (v, sensitive) => {
+    if(v === null || v === undefined) return '';
+    const s = String(v).trim();
+    return sensitive ? s : s.toLowerCase();
+  };
+
+  let oldRows=[], newRows=[], singleRows=[];
+  let headersOld=[], headersNew=[], headersOne=[];
+  let changes=[]; // {id, column, prev, next, kind}
+  let changeCounts = new Map(); // column -> count
+
+  function buildKey(row, idCols, delim){
+    return idCols.map(c => String(row?.[c] ?? '')).join(delim);
+  }
+
+  function populateSelectors(common){
+    const idSel = $('#idCols'); idSel.innerHTML='';
+    common.forEach(h => { const o=document.createElement('option'); o.value=o.textContent=h; idSel.appendChild(o); });
+    const guesses = common.filter(c => /id|code|key|identifier/i.test(c)).slice(0,2);
+    const toSelect = guesses.length?guesses:[common[0]].filter(Boolean);
+    $$('#idCols option').forEach(o => o.selected = toSelect.includes(o.value));
+    fillCompareColumns(common);
+    $('#commonInfo').innerHTML = common.map(c=>`<span class="chip">${c}</span>`).join(' ');
+  }
+
+  function fillCompareColumns(common){
+    const idChosen = $$('#idCols option:checked').map(o=>o.value);
+    const cmpSel = $('#cmpCols');
+    cmpSel.innerHTML='';
+    common.filter(c => !idChosen.includes(c)).forEach(h => {
+      const o=document.createElement('option'); o.value=o.textContent=h; o.selected=true; cmpSel.appendChild(o);
+    });
+  }
+
+  function detectPairsFromHeaders(headers){
+    // Try to infer base fields: e.g., Age_Old vs Age_New, Price.old vs Price.new, or (Old)/(New)
+    const patterns = [
+      {old:/(.*?)[ _.-]old$/i,   neu:/(.*?)[ _.-]new$/i},
+      {old:/(.*?)[ _.-]prev$/i,  neu:/(.*?)[ _.-]curr(ent)?$/i},
+      {old:/^old[ _.-](.+)$/i,   neu:/^new[ _.-](.+)$/i}
+    ];
+    const result = [];
+    headers.forEach(h=>{
+      patterns.forEach(p=>{
+        const mo = h.match(p.old); if(mo){
+          const base = (mo[1]||'').trim();
+          const ncol = headers.find(x=>p.neu.test(x) && (x.match(p.neu)[1]||'').trim()===base);
+          if(ncol){ result.push({base, old:h, neu:ncol}); }
+        }
+      });
+    });
+    // De-dup by base
+    const seen=new Set();
+    return result.filter(r=>{ if(seen.has(r.base)) return false; seen.add(r.base); return true; });
+  }
+
+  function renderPairsTable(headers){
+    const tbody = $('#pairsTable tbody');
+    tbody.innerHTML='';
+    const inferred = detectPairsFromHeaders(headers);
+    const bases = new Set(inferred.map(x=>x.base));
+
+    // Preload inferred pairs
+    inferred.forEach(({base,old,neu})=> tbody.appendChild(pairRow(headers, base, old, neu)) );
+
+    // Add a few blank rows for manual mapping
+    for(let i=0;i<5;i++) tbody.appendChild(pairRow(headers, '', '', ''));
+  }
+
+  function pairRow(headers, base, oldCol, newCol){
+    const tr=document.createElement('tr');
+    const tdBase=document.createElement('td');
+    const inp=document.createElement('input'); inp.className='pill'; inp.placeholder='Base field (e.g., Age)'; inp.value=base||''; tdBase.appendChild(inp);
+
+    const tdOld=document.createElement('td'); const selOld=document.createElement('select'); selOld.innerHTML = ['<option value="">(none)</option>', ...headers.map(h=>`<option${h===oldCol?' selected':''}>${h}</option>`)].join(''); selOld.className='pill'; tdOld.appendChild(selOld);
+    const tdNew=document.createElement('td'); const selNew=document.createElement('select'); selNew.innerHTML = ['<option value="">(none)</option>', ...headers.map(h=>`<option${h===newCol?' selected':''}>${h}</option>`)].join(''); selNew.className='pill'; tdNew.appendChild(selNew);
+
+    tr.appendChild(tdBase); tr.appendChild(tdOld); tr.appendChild(tdNew);
+    return tr;
+  }
+
+  function getPairMappings(){
+    const rows=[...$('#pairsTable tbody').children];
+    const mappings=[]; // {base, oldCol, newCol}
+    rows.forEach(r=>{
+      const base=r.children[0].querySelector('input').value.trim();
+      const oldCol=r.children[1].querySelector('select').value.trim();
+      const newCol=r.children[2].querySelector('select').value.trim();
+      if(base && oldCol && newCol){ mappings.push({base, oldCol, newCol}); }
+    });
+    return mappings;
+  }
+
+  async function detectHeaders(){
+    const mode = $('#modeSel').value;
+    if(mode==='two'){
+      const of=$('#fileOld').files[0], nf=$('#fileNew').files[0];
+      if(!of || !nf){ alert('Select both files first.'); return; }
+      oldRows = await readExcel(of) || [];
+      newRows = await readExcel(nf) || [];
+      headersOld = Object.keys(oldRows[0] || {});
+      headersNew = Object.keys(newRows[0] || {});
+      const common = headersOld.filter(h => headersNew.includes(h));
+      populateSelectors(common);
+    } else {
+      const one=$('#fileOne').files[0];
+      if(!one){ alert('Select the single file first.'); return; }
+      singleRows = await readExcel(one) || [];
+      headersOne = Object.keys(singleRows[0] || {});
+      populateSelectors(headersOne);
+      // Snapshot config bits
+      const verSel = $('#versionCol'); verSel.innerHTML='';
+      headersOne.forEach(h=>{ const o=document.createElement('option'); o.value=o.textContent=h; verSel.appendChild(o); });
+      const guess = headersOne.find(h=>/version|snapshot|date|as_of|updated/i.test(h)); if(guess) verSel.value=guess;
+      populateVersionValues();
+      // Pairs mapping
+      renderPairsTable(headersOne);
+    }
+  }
+
+  function populateVersionValues(){
+    if($('#modeSel').value!=='one') return;
+    const col = $('#versionCol').value; if(!col) return;
+    const vals = Array.from(new Set(singleRows.map(r=>r[col]).filter(v=>v!==null && v!==undefined))).sort();
+    const oldSel = $('#versionOld'); const newSel = $('#versionNew');
+    oldSel.innerHTML=''; newSel.innerHTML='';
+    vals.forEach(v=>{
+      const a=document.createElement('option'); a.value=a.textContent=v; oldSel.appendChild(a);
+      const b=document.createElement('option'); b.value=b.textContent=v; newSel.appendChild(b);
+    });
+    if(vals.length>=2){ oldSel.value = vals[0]; newSel.value = vals[vals.length-1]; }
+  }
+
+  function computeDiff(){
+    changes=[]; changeCounts = new Map();
+    const idCols = $$('#idCols option:checked').map(o=>o.value);
+    if(idCols.length===0){ alert('Choose at least one identifier column.'); return; }
+
+    const sensitive = $('#caseMode').value === 'sensitive';
+    const delim = $('#idDelim').value || '||';
+    const cmpCols = $$('#cmpCols option:checked').map(o=>o.value);
+
+    const mode = $('#modeSel').value;
+
+    let oldMap, newMap;
+    if(mode==='two'){
+      oldMap = new Map(oldRows.map(r => [buildKey(r, idCols, delim), r]));
+      newMap = new Map(newRows.map(r => [buildKey(r, idCols, delim), r]));
+    } else {
+      const singleType = $('#singleType').value;
+      if(singleType==='snapshot'){
+        const verCol = $('#versionCol').value; const ov=$('#versionOld').value; const nv=$('#versionNew').value;
+        if(!verCol || !ov || !nv){ alert('Choose version column and both old/new values.'); return; }
+        const oldSet = singleRows.filter(r => String(r[verCol])===String(ov));
+        const newSet = singleRows.filter(r => String(r[verCol])===String(nv));
+        oldMap = new Map(oldSet.map(r => [buildKey(r, idCols, delim), r]));
+        newMap = new Map(newSet.map(r => [buildKey(r, idCols, delim), r]));
+      } else { // pairs
+        const mappings = getPairMappings();
+        if(!mappings.length){ alert('Add at least one column mapping (base, old, new).'); return; }
+        // For pairs mode, we still need keys from idCols, but values come from different columns per mapping
+        // Build a key set from all rows (assume unified set)
+        const all = singleRows; // same key space for old/new
+        const keyMap = new Map(all.map(r => [buildKey(r, idCols, delim), r]));
+        const keys = [...keyMap.keys()];
+        keys.forEach(k => {
+          const row = keyMap.get(k);
+          mappings.forEach(({base, oldCol, newCol}) => {
+            const pv = norm(row[oldCol], sensitive);
+            const nv = norm(row[newCol], sensitive);
+            if(pv !== nv){
+              changes.push({ id:k, column:base, prev: row[oldCol] ?? '', next: row[newCol] ?? '', kind:'changed' });
+              changeCounts.set(base, (changeCounts.get(base)||0)+1);
+            }
+          });
+        });
+        renderSummary();
+        renderTable();
+        return; // pairs mode finished here
+      }
+    }
+
+    // For two/snapshot modes we compare selected cmpCols field-by-field
+    const keys = new Set([...oldMap.keys(), ...newMap.keys()]);
+    keys.forEach(k => {
+      const o = oldMap.get(k); const n = newMap.get(k);
+      if(o && n){
+        cmpCols.forEach(col => {
+          const pv = norm(o[col], sensitive);
+          const nv = norm(n[col], sensitive);
+          if(pv !== nv){
+            changes.push({ id:k, column:col, prev: o[col] ?? '', next: n[col] ?? '', kind:'changed' });
+            changeCounts.set(col, (changeCounts.get(col)||0)+1);
+          }
+        });
+      } else if(n && !o){
+        changes.push({ id:k, column:'[row added]', prev:'', next:'', kind:'added' });
+        cmpCols.forEach(col => { const v=n[col]; if(v!==null && v!==undefined && String(v)!=='') changes.push({ id:k, column:col, prev:'', next:v, kind:'added' });});
+      } else if(o && !n){
+        changes.push({ id:k, column:'[row removed]', prev:'', next:'', kind:'removed' });
+        cmpCols.forEach(col => { const v=o[col]; if(v!==null && v!==undefined && String(v)!=='') changes.push({ id:k, column:col, prev:v, next:'', kind:'removed' });});
+      }
+    });
+
+    renderSummary();
+    renderTable();
+  }
+
+  function renderSummary(){
+    const container = $('#summaryList');
+    container.innerHTML = '';
+    Array.from(changeCounts.entries()).sort((a,b)=>b[1]-a[1]).forEach(([col,cnt])=>{
+      const div=document.createElement('div');
+      div.className='summary-item';
+      div.textContent = `${col}: ${cnt}`;
+      container.appendChild(div);
+    });
+    $('#btnExportSummary').disabled = changeCounts.size===0;
+  }
+
+  function renderTable(){
+    const filter = $('#filterInput').value.toLowerCase();
+    const showAdds = $('#toggleAdds').checked;
+    const showRemoves = $('#toggleRemoves').checked;
+
+    const tbody = $('#resultTable tbody');
+    tbody.innerHTML = '';
+
+    const rows = changes.filter(r => {
+      if(r.kind==='added' && !showAdds) return false;
+      if(r.kind==='removed' && !showRemoves) return false;
+      const t = `${r.id} ${r.column} ${r.prev} ${r.next}`.toLowerCase();
+      return t.includes(filter);
+    });
+
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      if(r.kind==='added') tr.classList.add('added');
+      if(r.kind==='removed') tr.classList.add('removed');
+      tr.innerHTML = `
+        <td><code>${escapeHtml(r.id)}</code> <span class="badge">${r.kind}</span></td>
+        <td>${escapeHtml(r.column)}</td>
+        <td>${escapeHtml(r.prev)}</td>
+        <td>${escapeHtml(r.next)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    const summaryOnly = $('#toggleSummaryOnly').checked;
+    $('#resultTable').style.display = (!summaryOnly && rows.length) ? '' : 'none';
+
+    $('#btnExport').disabled = rows.length===0;
+    const counts = {
+      changed: changes.filter(c=>c.kind==='changed').length,
+      added: changes.filter(c=>c.kind==='added').length,
+      removed: changes.filter(c=>c.kind==='removed').length,
+      total: changes.length
+    };
+    $('#resultCounts').textContent = `Changes: ${counts.changed} • Added: ${counts.added} • Removed: ${counts.removed} • Total entries: ${counts.total}`;
+  }
+
+  function exportCSV(){
+    const headers = ["Identifier","Column","Previous","Latest","Kind"];
+    const rows = changes.map(c => [c.id, c.column, c.prev, c.next, c.kind]);
+    downloadCSV('excel-diff.csv', headers, rows);
+  }
+
+  function exportSummaryCSV(){
+    const headers = ["Column","ChangeCount"];
+    const rows = Array.from(changeCounts.entries());
+    downloadCSV('excel-diff-summary.csv', headers, rows);
+  }
+
+  function downloadCSV(filename, headers, rows){
+    const csv = [headers.join(','), ...rows.map(r => r.map(csvEscape).join(','))].join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function csvEscape(v){
+    const s = String(v??'');
+    if(/[",\n]/.test(s)) return '"' + s.replaceAll('"','""') + '"';
+    return s;
+  }
+
+  function escapeHtml(s){
+    return String(s??'')
+      .replaceAll('&','&amp;')
+      .replaceAll('<','&lt;')
+      .replaceAll('>','&gt;');
+  }
+
+  // Event wiring
+  $('#btnPeek').addEventListener('click', async () => { await detectHeaders(); });
+  $('#btnCompare').addEventListener('click', () => { computeDiff(); });
+  $('#btnExport').addEventListener('click', exportCSV);
+  $('#btnExportSummary').addEventListener('click', exportSummaryCSV);
+  $('#filterInput').addEventListener('input', renderTable);
+  $('#toggleAdds').addEventListener('change', renderTable);
+  $('#toggleRemoves').addEventListener('change', renderTable);
+  $('#toggleSummaryOnly').addEventListener('change', renderTable);
+
+  $('#idCols').addEventListener('change', () => {
+    const mode = $('#modeSel').value;
+    if(mode==='two'){
+      const common = headersOld.filter(h => headersNew.includes(h));
+      fillCompareColumns(common);
+    } else {
+      const headers = headersOne.length ? headersOne : Object.keys(singleRows[0]||{});
+      fillCompareColumns(headers);
+    }
+  });
+
+  $('#btnSelectAll').addEventListener('click', () => { $$('#cmpCols option').forEach(o=>o.selected=true); });
+  $('#btnClearAll').addEventListener('click', () => { $$('#cmpCols option').forEach(o=>o.selected=false); });
+
+  $('#modeSel').addEventListener('change', () => {
+    const two = $('#modeSel').value==='two';
+    $('#twoFileInputs').style.display = two ? '' : 'none';
+    $('#oneFileInputs').style.display = two ? 'none' : '';
+    $('#oneStrategyBox').style.display = two ? 'none' : '';
+    $('#snapshotConfig').style.display = (!two && $('#singleType').value==='snapshot') ? '' : 'none';
+    $('#pairsConfig').style.display = (!two && $('#singleType').value==='pairs') ? '' : 'none';
+    // clear previously detected
+    $('#commonInfo').innerHTML='';
+    $('#idCols').innerHTML='';
+    $('#cmpCols').innerHTML='';
+  });
+
+  $('#singleType').addEventListener('change', () => {
+    const pairs = $('#singleType').value==='pairs';
+    $('#snapshotConfig').style.display = pairs ? 'none' : '';
+    $('#pairsConfig').style.display = pairs ? '' : 'none';
+  });
+
+  $('#versionCol').addEventListener('change', populateVersionValues);
+  $('#fileOne').addEventListener('change', async () => { if($('#modeSel').value==='one') await detectHeaders(); });
+  $('#fileOld').addEventListener('change', async () => { if($('#modeSel').value==='two' && $('#fileNew').files[0]) await detectHeaders(); });
+  $('#fileNew').addEventListener('change', async () => { if($('#modeSel').value==='two' && $('#fileOld').files[0]) await detectHeaders(); });
+</script>
+</body>
+</html>
